@@ -1,5 +1,5 @@
 // Network first (always fresh when online), cache as the offline fallback.
-const CACHE = 'lapse-v1';
+const CACHE = 'lapse-v2';
 const SHELL = [
   './',
   'index.html',
@@ -10,6 +10,8 @@ const SHELL = [
   'js/camera.js',
   'js/wake.js',
   'js/export.js',
+  'js/timelog.js',
+  'js/charts.js',
   'vendor/mp4-muxer.mjs',
   'manifest.webmanifest',
   'icons/icon-192.png',

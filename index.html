@@ -34,6 +34,9 @@
 
 <section id="ready" class="screen">
   <div class="top">
+    <button id="statsBtn" class="round" aria-label="Stats">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 20v-7M12 20V5M18 20v-10"/></svg>
+    </button>
     <button id="flip" class="round" aria-label="Switch camera">
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/></svg>
     </button>
@@ -88,6 +91,16 @@
   <div id="bar" class="bar"><i id="prog"></i></div>
   <p id="finishMsg" class="note" hidden></p>
   <button id="retry" class="pill" hidden>Try again</button>
+</section>
+
+<section id="stats" class="screen">
+  <div class="stats-head">
+    <h1>Stats</h1>
+    <button id="statsClose" class="round" aria-label="Close stats">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+  </div>
+  <div id="statsBody" class="stats-body"></div>
 </section>
 
 <section id="result" class="screen center">

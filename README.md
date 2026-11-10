@@ -12,6 +12,12 @@ Timelapse yourself while you work. The screen stays pure black while it records,
 
 At "every 5s", one hour of work becomes a 24-second video.
 
+## Stats, and Nook
+
+Tap the chart icon on the camera screen for your stats: today, this week, streak, total, the last 7 days, the time of day you record most, and a history of past timelapses. Sessions shorter than a minute don't count.
+
+**Send to Nook** copies your stats (times only, no photos or video) as a short text code. In [Nook](https://github.com/jeremychen24/nook), open Stats and tap **Paste from Lapse**. Home Screen apps on iPhone can't read each other's data, so this copy-paste is the bridge. Sending again is safe: sessions are matched by ID and never counted twice. The format lives in `js/timelog.js`, a file shared word-for-word with Nook.
+
 ## Battery
 
 iOS doesn't let any app use the camera with the screen truly off. On iPhones with an OLED screen (iPhone X and later, except the XR, 11 and SE), black pixels are unlit, so a pure-black screen costs almost nothing. The camera runs at a low frame rate, and a screen wake lock stops Auto-Lock from cutting the recording short.

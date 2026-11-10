@@ -6,6 +6,8 @@ import * as store from './store.js';
 import { openCamera, closeCamera, cameraCount } from './camera.js';
 import { keepAwake, wakeSupported } from './wake.js';
 import { buildVideo, saveVideo } from './export.js';
+import * as T from './timelog.js';
+import { weekChart, hourChart } from './charts.js';
 
 const $ = (id) => document.getElementById(id);
 const cam = $('cam');
@@ -20,7 +22,7 @@ if (!L.INTERVALS.includes(prefs.interval)) prefs.interval = 5;
 
 let stream = null;
 let camToken = 0;
-let session = null; // { w, h, interval, facing, recMs, frames, startedAt }
+let session = null; // { id, w, h, interval, facing, recMs, frames, startedAt, segs: [[start, end], ...] }
 let running = false;
 let segStart = 0;
 let shotTimer = 0;
@@ -51,6 +53,8 @@ function show(name) {
   document.body.dataset.screen = name;
 }
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const uid = () => globalThis.crypto?.randomUUID?.() ?? Date.now().toString(36) + Math.random().toString(36).slice(2);
+const lastSeg = () => session.segs[session.segs.length - 1];
 const statsLine = () => `${L.formatClock(session.recMs)} · ${plural(session.frames, 'frame')}`;
 
 // Tap once to arm, again within 3 s to confirm. Keeps destructive actions off a single tap.
@@ -179,12 +183,14 @@ $('rec').onclick = async () => {
   if (!stream) return;
   const { w, h } = L.fitSize(cam.videoWidth || 1080, cam.videoHeight || 1920);
   session = {
+    id: uid(),
     w, h,
     interval: devInterval || prefs.interval,
     facing: prefs.facing,
     recMs: 0,
     frames: 0,
     startedAt: Date.now(),
+    segs: [],
   };
   try {
     await store.clearAll();
@@ -238,6 +244,8 @@ function recordedMs() {
 function beginSegment() {
   running = true;
   segStart = performance.now();
+  const now = Date.now();
+  session.segs.push([now, now]);
   shoot();
 }
 
@@ -265,6 +273,7 @@ async function capture() {
     const blob = await new Promise((res) => canvas.toBlob(res, 'image/jpeg', 0.85));
     if (!blob || !running) return;
     const buf = await blob.arrayBuffer();
+    lastSeg()[1] = Date.now();
     await store.addFrame(buf, { ...session, frames: session.frames + 1, recMs: recordedMs() });
     session.frames += 1;
     if (!document.body.classList.contains('dark')) renderStats();
@@ -278,6 +287,7 @@ async function capture() {
 function pauseRecording() {
   if (running) {
     session.recMs = recordedMs();
+    lastSeg()[1] = Date.now();
     running = false;
   }
   clearTimeout(shotTimer);
@@ -380,6 +390,7 @@ async function finish() {
       onProgress: setProgress,
     });
     showResult(blob, keys.length);
+    logSession(keys);
   } catch (e) {
     console.error(e);
     $('finishMsg').textContent =
@@ -426,6 +437,129 @@ $('save').onclick = async () => {
   }
 };
 
+// ---------- stats ----------
+
+const MIN_LOG_MS = 60000; // shorter tries don't count
+let logCache = [];
+
+async function makeThumb(buf) {
+  const bitmap = await createImageBitmap(new Blob([buf], { type: 'image/jpeg' }));
+  const size = 112;
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const r = L.coverRect(bitmap.width, bitmap.height, size, size);
+  c.getContext('2d').drawImage(bitmap, r.sx, r.sy, r.sw, r.sh, 0, 0, size, size);
+  bitmap.close();
+  return c.toDataURL('image/jpeg', 0.7);
+}
+
+// One entry per session; finishing again after "Keep recording" updates it.
+async function logSession(keys) {
+  const segs = session.segs.filter(([s, e]) => e > s).map(([s, e]) => [s, e]);
+  if (!segs.length || (session.recMs < MIN_LOG_MS && !devInterval)) return;
+  const entry = { id: session.id, segs, frames: keys.length, interval: session.interval, recMs: Math.round(session.recMs), thumb: '' };
+  try {
+    entry.thumb = await makeThumb(await store.getFrame(keys[Math.floor(keys.length / 2)]));
+  } catch { /* stats still work without a picture */ }
+  await store.putLog(entry).catch(() => {});
+}
+
+async function openStats() {
+  dropStream();
+  try {
+    logCache = await store.getLog();
+  } catch {
+    logCache = [];
+  }
+  logCache.sort((a, b) => T.entryStart(b) - T.entryStart(a));
+  renderStatsScreen();
+  show('stats');
+  $('statsBody').scrollTop = 0;
+}
+
+function historyRow(e) {
+  const start = new Date(T.entryStart(e));
+  const day = start.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  const time = start.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  const thumb = /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(e.thumb || '') ? `<img src="${e.thumb}" alt="">` : '<span class="ph"></span>';
+  return `<li>${thumb}<div><b>${day} · ${time}</b><small>${L.formatSpan(T.entryMs(e) / 1000)} · ${L.formatSpan(L.videoSeconds(e.frames))} video</small></div></li>`;
+}
+
+function renderStatsScreen() {
+  const body = $('statsBody');
+  if (!logCache.length) {
+    body.innerHTML = '<p class="empty">Finish a timelapse of a minute or more and your stats show up here.</p>';
+    return;
+  }
+  const s = T.computeStats(logCache);
+  const chart = (svg) => `<div class="chart">${svg}<div class="chart-tip" hidden></div></div>`;
+  const tile = (label, value) => `<div class="tile"><span>${label}</span><b>${value}</b></div>`;
+  body.innerHTML = `
+    <div class="tiles">
+      ${tile('Today', T.fmtMinutes(s.todayMin))}
+      ${tile('This week', T.fmtMinutes(s.weekMin))}
+      ${tile('Streak', plural(s.streak, 'day'))}
+      ${tile('Total', T.fmtMinutes(s.totalMin))}
+    </div>
+    <h2 class="sec">Last 7 days</h2>
+    ${chart(weekChart(s.days))}
+    <h2 class="sec">Time of day</h2>
+    ${chart(hourChart(s.hours, s.bestHour))}
+    ${s.bestHour === null ? '' : `<p class="caption">You record the most around ${T.fmtHour(s.bestHour)}</p>`}
+    <h2 class="sec">History</h2>
+    <ul class="history">${logCache.slice(0, 50).map(historyRow).join('')}</ul>
+    <div class="send">
+      <button id="sendNook" class="pill">Send to Nook</button>
+      <p class="hint">Copies your stats (no photos or video). Then in Nook, open Stats and tap Paste from Lapse.</p>
+    </div>`;
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch { /* fall back to the old way */ }
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.setAttribute('readonly', '');
+  ta.style.cssText = 'position:fixed;opacity:0';
+  document.body.append(ta);
+  ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { /* no clipboard */ }
+  ta.remove();
+  return ok;
+}
+
+// Tooltips: hover on a computer, tap on a phone. Every value is also in the hidden tables.
+function showTip(e) {
+  const target = e.target.closest('[data-tip]');
+  const box = e.target.closest('.chart');
+  document.querySelectorAll('.chart-tip').forEach((t) => {
+    if (!box || !box.contains(t)) t.hidden = true;
+  });
+  if (!target || !box) return;
+  const tip = box.querySelector('.chart-tip');
+  const r = target.getBoundingClientRect();
+  const frame = box.getBoundingClientRect();
+  tip.textContent = target.dataset.tip;
+  tip.style.left = `${Math.min(Math.max(r.left + r.width / 2 - frame.left, 40), frame.width - 40)}px`;
+  tip.style.top = `${r.top - frame.top + 8}px`;
+  tip.hidden = false;
+}
+
+$('statsBody').addEventListener('pointerover', showTip);
+$('statsBody').addEventListener('pointerdown', showTip);
+$('statsBody').addEventListener('click', async (e) => {
+  const btn = e.target.closest('#sendNook');
+  if (!btn) return;
+  const ok = await copyText(T.encodeSync(logCache)); // built before any await: iOS needs the tap
+  btn.textContent = ok ? 'Copied · now paste in Nook' : 'Couldn’t copy';
+  setTimeout(() => (btn.textContent = 'Send to Nook'), 3000);
+});
+$('statsBtn').onclick = openStats;
+$('statsClose').onclick = showReady;
+
 $('more').onclick = () => {
   clearResult();
   resume();
@@ -455,6 +589,8 @@ async function boot() {
       const n = await store.frameCount();
       if (n > 0) {
         session = { ...meta, frames: n };
+        session.id ??= uid();
+        session.segs ??= [[session.startedAt, session.startedAt + Math.round(session.recMs)]];
         $('recoverStats').textContent = statsLine();
         show('recover');
         return;

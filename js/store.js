@@ -2,15 +2,20 @@
 // a lock screen or a killed tab never loses the timelapse.
 // frames: JPEG ArrayBuffers (auto-increment keys keep them in order)
 // meta:   the current session under the key 'session'
+// log:    one entry per finished timelapse, for Stats (see timelog.js)
 
 let dbp = null;
 
 function db() {
   dbp ??= new Promise((resolve, reject) => {
-    const req = indexedDB.open('lapse', 1);
-    req.onupgradeneeded = () => {
-      req.result.createObjectStore('frames', { autoIncrement: true });
-      req.result.createObjectStore('meta');
+    const req = indexedDB.open('lapse', 2);
+    req.onupgradeneeded = (e) => {
+      const d = req.result;
+      if (e.oldVersion < 1) {
+        d.createObjectStore('frames', { autoIncrement: true });
+        d.createObjectStore('meta');
+      }
+      if (e.oldVersion < 2) d.createObjectStore('log', { keyPath: 'id' });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -54,6 +59,9 @@ export const clearAll = () =>
     t.objectStore('frames').clear();
     t.objectStore('meta').clear();
   });
+
+export const putLog = (entry) => run('log', 'readwrite', (t) => void t.objectStore('log').put(entry));
+export const getLog = () => run('log', 'readonly', (t) => t.objectStore('log').getAll());
 
 // Ask the browser not to evict our data under storage pressure.
 export const persist = () => navigator.storage?.persist?.().catch(() => {});
