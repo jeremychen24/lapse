@@ -8,7 +8,7 @@ Timelapse yourself while you work. The screen stays pure black while it records,
 
 1. Prop up your phone, pick how often to take a shot (every 2s to 1 min), and tap the red button.
 2. After a 3-second countdown the screen goes black. Tap anywhere to check the time and frame count, and it goes dark again by itself.
-3. Tap stop. Lapse builds an MP4 (30 fps) right on your phone, and **Save video** puts it in Photos.
+3. Tap stop and the MP4 (30 fps) is ready right away. **Save video** puts it in Photos.
 
 At "every 5s", one hour of work becomes a 24-second video.
 
@@ -24,7 +24,8 @@ iOS doesn't let any app use the camera with the screen truly off. On iPhones wit
 
 ## Safe by design
 
-- Every shot is saved on the device the moment it's taken. If you switch apps, lock the phone or the app closes, the timelapse pauses, and next time you can resume or finish it.
+- Each shot goes straight into the video as it's taken, and only those small video pieces are kept (about 25–30 MB per hour at "every 5s", not a pile of photos). If you switch apps, lock the phone or the app closes, the timelapse pauses, and next time you can resume or finish it.
+- As soon as you save the video, Lapse deletes its own copy. Only your stats (times and a tiny thumbnail) stay.
 - Nothing is uploaded. Lapse has no server, and your video never leaves your phone unless you share it.
 
 Needs iOS 16.4+ (or a recent Chrome/Edge/Safari) for building the video.

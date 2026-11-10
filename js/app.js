@@ -5,7 +5,7 @@ import * as L from './lapse.js';
 import * as store from './store.js';
 import { openCamera, closeCamera, cameraCount } from './camera.js';
 import { keepAwake, wakeSupported } from './wake.js';
-import { buildVideo, saveVideo } from './export.js';
+import { buildVideo, saveVideo, pickConfig, LiveEncoder, muxChunks } from './export.js';
 import * as T from './timelog.js';
 import * as D from './dash.js';
 import { weekChart, hourChart, monthHeatmap } from './charts.js';
@@ -23,7 +23,10 @@ if (!L.INTERVALS.includes(prefs.interval)) prefs.interval = 5;
 
 let stream = null;
 let camToken = 0;
-let session = null; // { id, w, h, interval, facing, recMs, frames, startedAt, segs: [[start, end], ...] }
+// { id, fmt: 'h264', config, desc, thumb, w, h, interval, facing, recMs, frames, startedAt, segs: [[start, end], ...] }
+let session = null;
+let encoder = null; // LiveEncoder for the current recording, opened on the first shot
+let writes = Promise.resolve(); // stored video pieces, in order
 let running = false;
 let segStart = 0;
 let shotTimer = 0;
@@ -184,8 +187,20 @@ $('flip').onclick = () => {
 $('rec').onclick = async () => {
   if (!stream) return;
   const { w, h } = L.fitSize(cam.videoWidth || 1080, cam.videoHeight || 1920);
+  let config;
+  try {
+    config = await pickConfig(w, h);
+  } catch {
+    $('ratio').textContent = 'This browser can’t record video. Update to iOS 16.4 or later.';
+    return;
+  }
+  closeEncoder();
   session = {
     id: uid(),
+    fmt: 'h264',
+    config,
+    desc: null,
+    thumb: '',
     w, h,
     interval: devInterval || prefs.interval,
     facing: prefs.facing,
@@ -226,6 +241,7 @@ function countdown() {
 $('countdown').onclick = () => {
   clearInterval(countTimer);
   if (session && session.frames === 0) {
+    closeEncoder();
     session = null;
     store.clearAll().catch(() => {});
     keepAwake(false);
@@ -260,6 +276,7 @@ async function shoot() {
   shotTimer = setTimeout(shoot, delay);
 }
 
+// Each shot goes straight into the video encoder; only the small encoded pieces are stored.
 async function capture() {
   if (busy || cam.readyState < 2 || !cam.videoWidth) return;
   busy = true;
@@ -272,18 +289,40 @@ async function capture() {
     // Drawn un-mirrored, so text behind you reads the right way in the video.
     const r = L.coverRect(cam.videoWidth, cam.videoHeight, w, h);
     ctx.drawImage(cam, r.sx, r.sy, r.sw, r.sh, 0, 0, w, h);
-    const blob = await new Promise((res) => canvas.toBlob(res, 'image/jpeg', 0.85));
-    if (!blob || !running) return;
-    const buf = await blob.arrayBuffer();
+    if (!running) return;
+    encoder ??= new LiveEncoder(session.config, onChunk);
+    encoder.encode(canvas, session.frames);
+    if (session.frames % THUMB_EVERY === 0) session.thumb = thumbFrom(canvas);
     lastSeg()[1] = Date.now();
-    await store.addFrame(buf, { ...session, frames: session.frames + 1, recMs: recordedMs() });
     session.frames += 1;
     if (!document.body.classList.contains('dark')) renderStats();
   } catch (e) {
-    if (e?.name === 'QuotaExceededError') showPaused('Your phone’s storage is full. Finish to save what you have.');
+    console.error(e);
   } finally {
     busy = false;
   }
+}
+
+const copyBuffer = (b) => (b instanceof ArrayBuffer ? b.slice(0) : b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
+
+function onChunk(chunk, meta) {
+  if (!session) return;
+  const data = new ArrayBuffer(chunk.byteLength);
+  chunk.copyTo(data);
+  const desc = meta?.decoderConfig?.description;
+  if (desc && !session.desc) session.desc = copyBuffer(desc);
+  const piece = { ts: chunk.timestamp, dur: chunk.duration ?? 0, key: chunk.type === 'key', data };
+  const snapshot = { ...session, recMs: recordedMs() };
+  writes = writes
+    .then(() => store.addChunk(piece, snapshot))
+    .catch((e) => {
+      if (e?.name === 'QuotaExceededError') showPaused('Your phone’s storage is full. Finish to save what you have.');
+    });
+}
+
+function closeEncoder() {
+  encoder?.close();
+  encoder = null;
 }
 
 function pauseRecording() {
@@ -293,6 +332,7 @@ function pauseRecording() {
     running = false;
   }
   clearTimeout(shotTimer);
+  encoder?.flush(); // push the last pieces to storage
   if (session) store.putMeta({ ...session }).catch(() => {});
 }
 
@@ -382,17 +422,18 @@ async function finish() {
   show('finishing');
   keepAwake(true);
   try {
-    const keys = await store.frameKeys();
+    await encoder?.flush();
+    closeEncoder();
+    await writes;
+    const h264 = session.fmt === 'h264';
+    const keys = h264 ? await store.chunkKeys() : await store.frameKeys();
     if (!keys.length) return void (await discard());
-    const blob = await buildVideo({
-      keys,
-      getFrame: store.getFrame,
-      width: session.w,
-      height: session.h,
-      onProgress: setProgress,
-    });
+    const size = { width: session.w, height: session.h, onProgress: setProgress };
+    const blob = h264
+      ? await muxChunks({ keys, getChunk: store.getChunk, codec: session.config.codec, description: session.desc, ...size })
+      : await buildVideo({ keys, getFrame: store.getFrame, ...size });
     showResult(blob, keys.length);
-    logSession(keys);
+    logSession(keys.length);
   } catch (e) {
     console.error(e);
     $('finishMsg').textContent =
@@ -426,6 +467,7 @@ function showResult(blob, frames) {
   $('out').play().catch(() => {});
   $('summary').textContent = `${L.formatSpan(L.videoSeconds(frames))} video · ${L.formatSpan(session.recMs / 1000)} recorded`;
   $('save').textContent = 'Save video';
+  $('more').hidden = false;
   armed($('new'), 'New', 'Tap again to discard', discard, () => result?.saved);
   show('result');
 }
@@ -433,10 +475,14 @@ function showResult(blob, frames) {
 $('save').onclick = async () => {
   if (!result) return;
   const how = await saveVideo(result.file, result.url);
-  if (how !== 'cancelled') {
-    result.saved = true;
-    $('save').textContent = 'Saved';
-  }
+  if (how === 'cancelled') return;
+  result.saved = true;
+  $('save').textContent = 'Saved';
+  // The video is on your phone now, so Lapse's copy goes (the video stays here until you leave).
+  $('more').hidden = true;
+  await writes;
+  await store.clearAll().catch(() => {});
+  $('summary').textContent = 'Saved. Lapse’s copy was deleted to free up space.';
 };
 
 // ---------- stats ----------
@@ -444,25 +490,26 @@ $('save').onclick = async () => {
 const MIN_LOG_MS = 60000; // shorter tries don't count
 let logCache = [];
 
-async function makeThumb(buf) {
-  const bitmap = await createImageBitmap(new Blob([buf], { type: 'image/jpeg' }));
-  const size = 112;
-  const c = document.createElement('canvas');
-  c.width = c.height = size;
-  const r = L.coverRect(bitmap.width, bitmap.height, size, size);
-  c.getContext('2d').drawImage(bitmap, r.sx, r.sy, r.sw, r.sh, 0, 0, size, size);
-  bitmap.close();
-  return c.toDataURL('image/jpeg', 0.7);
+const THUMB_EVERY = 120; // refresh the stats thumbnail now and then (every 10 min at 5s)
+
+function thumbFrom(source) {
+  try {
+    const size = 112;
+    const c = document.createElement('canvas');
+    c.width = c.height = size;
+    const r = L.coverRect(source.width, source.height, size, size);
+    c.getContext('2d').drawImage(source, r.sx, r.sy, r.sw, r.sh, 0, 0, size, size);
+    return c.toDataURL('image/jpeg', 0.7);
+  } catch {
+    return '';
+  }
 }
 
 // One entry per session; finishing again after "Keep recording" updates it.
-async function logSession(keys) {
+async function logSession(frames) {
   const segs = session.segs.filter(([s, e]) => e > s).map(([s, e]) => [s, e]);
   if (!segs.length || (session.recMs < MIN_LOG_MS && !devInterval)) return;
-  const entry = { id: session.id, segs, frames: keys.length, interval: session.interval, recMs: Math.round(session.recMs), thumb: '' };
-  try {
-    entry.thumb = await makeThumb(await store.getFrame(keys[Math.floor(keys.length / 2)]));
-  } catch { /* stats still work without a picture */ }
+  const entry = { id: session.id, segs, frames, interval: session.interval, recMs: Math.round(session.recMs), thumb: session.thumb || '' };
   await store.putLog(entry).catch(() => {});
   await loadLog();
   awardBadges();
@@ -671,8 +718,10 @@ $('more').onclick = () => {
 
 async function discard() {
   running = false;
+  closeEncoder();
   session = null;
   clearResult();
+  await writes; // let queued pieces land first, so nothing reappears after the wipe
   await store.clearAll().catch(() => {});
   await showReady();
 }
@@ -698,12 +747,14 @@ async function boot() {
   try {
     const meta = await store.getMeta();
     if (meta) {
-      const n = await store.frameCount();
+      const h264 = meta.fmt === 'h264';
+      const n = h264 ? await store.chunkCount() : await store.frameCount();
       if (n > 0) {
         session = { ...meta, frames: n };
         session.id ??= uid();
         session.segs ??= [[session.startedAt, session.startedAt + Math.round(session.recMs)]];
         $('recoverStats').textContent = statsLine();
+        $('recoverResume').hidden = !h264; // old photo-based sessions can be finished, not continued
         show('recover');
         return;
       }

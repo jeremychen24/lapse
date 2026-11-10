@@ -1,7 +1,7 @@
 // Network first (always fresh when online), cache as the offline fallback.
 // Requests skip the browser's HTTP cache (GitHub Pages allows 10 minutes),
 // so a new version shows up on the very next open.
-const CACHE = 'lapse-v3';
+const CACHE = 'lapse-v4';
 const SHELL = [
   './',
   'index.html',
