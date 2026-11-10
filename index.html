@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Lapse</title>
+<meta name="description" content="Timelapse yourself while you work. The screen stays dark to save battery.">
+<meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Lapse">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icons/favicon-32.png">
+<link rel="stylesheet" href="css/app.css">
+<script type="module" src="js/app.js"></script>
+</head>
+<body data-screen="boot">
+
+<video id="cam" playsinline muted autoplay></video>
+
+<section id="intro" class="screen center">
+  <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+    <circle cx="32" cy="32" r="22" fill="none" stroke="#f2f2ee" stroke-width="3.5" stroke-linecap="round" stroke-dasharray="124.4 13.8" transform="rotate(-27 32 32)"/>
+    <circle cx="32" cy="32" r="8" fill="#ff453a"/>
+  </svg>
+  <h1>Lapse</h1>
+  <p class="lede">Timelapse yourself while you work.<br>The screen stays dark to save battery.</p>
+  <button id="startCam" class="pill">Start camera</button>
+  <p id="camMsg" class="note" hidden></p>
+  <p id="homeTip" class="foot" hidden>Tip: Share → Add to Home Screen for a fully black screen</p>
+</section>
+
+<section id="ready" class="screen">
+  <div class="top">
+    <button id="flip" class="round" aria-label="Switch camera">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/></svg>
+    </button>
+  </div>
+  <div class="dock">
+    <button id="interval" class="chip">Every 5s</button>
+    <p id="ratio" class="hint"></p>
+    <button id="rec" class="shutter" aria-label="Start timelapse"><span></span></button>
+  </div>
+</section>
+
+<section id="countdown" class="screen center">
+  <div id="count" class="count">3</div>
+  <p class="hint">Going dark · tap to cancel</p>
+  <p id="awakeNote" class="note" hidden>Turn off Auto-Lock so recording isn’t interrupted.</p>
+</section>
+
+<section id="live" class="screen">
+  <div class="top">
+    <div class="status"><i class="dot"></i><span id="elapsed">0:00</span></div>
+    <p id="frames" class="hint">0 frames</p>
+  </div>
+  <div class="dock">
+    <button id="stop" class="shutter stop" aria-label="Stop and make video"><span></span></button>
+  </div>
+</section>
+
+<div id="dark"><p id="darkHint">Tap anywhere to check in</p></div>
+
+<section id="paused" class="screen center">
+  <h2>Paused</h2>
+  <p id="pausedStats" class="stats"></p>
+  <p id="pausedNote" class="note"></p>
+  <div class="actions">
+    <button id="resume" class="pill">Resume</button>
+    <button id="pausedFinish" class="pill ghost">Finish</button>
+  </div>
+</section>
+
+<section id="recover" class="screen center">
+  <h2>Unfinished timelapse</h2>
+  <p id="recoverStats" class="stats"></p>
+  <div class="actions">
+    <button id="recoverFinish" class="pill">Finish</button>
+    <button id="recoverResume" class="pill ghost">Resume</button>
+  </div>
+  <button id="recoverDiscard" class="link">Discard</button>
+</section>
+
+<section id="finishing" class="screen center">
+  <p class="title">Making your timelapse</p>
+  <div id="bar" class="bar"><i id="prog"></i></div>
+  <p id="finishMsg" class="note" hidden></p>
+  <button id="retry" class="pill" hidden>Try again</button>
+</section>
+
+<section id="result" class="screen center">
+  <video id="out" playsinline muted loop autoplay></video>
+  <p id="summary" class="hint"></p>
+  <button id="save" class="pill">Save video</button>
+  <div class="links">
+    <button id="more" class="link">Keep recording</button>
+    <button id="new" class="link">New</button>
+  </div>
+</section>
+
+</body>
+</html>

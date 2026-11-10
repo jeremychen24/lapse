@@ -1,0 +1,10 @@
+{
+  "name": "lapse",
+  "private": true,
+  "type": "module",
+  "description": "Timelapse yourself while you work. The screen stays dark to save battery.",
+  "scripts": {
+    "test": "node --test",
+    "start": "python -m http.server 8000"
+  }
+}
