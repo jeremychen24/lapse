@@ -63,6 +63,53 @@ export function weekChart(days) {
   )}`;
 }
 
+// Blue steps from a little recording to a lot (one hue, checked as an ordinal ramp on the
+// card surface). Day numbers use an ink that clears 4.5:1 on each step. Empty days are gray.
+const HEAT = ['#184f95', '#256abf', '#3987e5', '#86b6ef'];
+const HEAT_INK = ['#c9d6ea', '#eef3fa', '#06142a', '#06142a'];
+const HEAT_EMPTY = '#1f1f1f';
+const heatStep = (m) => (m === 0 ? -1 : m < 30 ? 0 : m < 60 ? 1 : m < 120 ? 2 : 3);
+
+// A month as a calendar grid, each day shaded by how long you recorded.
+export function monthHeatmap(weeks, todayKey, monthLabel) {
+  const gap = 6;
+  const cell = (W - gap * 6) / 7;
+  const top = 18;
+  const H = top + weeks.length * (cell + gap) + 22;
+  const month = monthLabel.split(' ')[0];
+  let svg = '';
+  ['M', 'T', 'W', 'T', 'F', 'S', 'S'].forEach((d, i) => {
+    svg += `<text x="${i * (cell + gap) + cell / 2}" y="11" text-anchor="middle" font-size="10" fill="${MUTED}">${d}</text>`;
+  });
+  weeks.forEach((week, r) =>
+    week.forEach((day, c) => {
+      if (!day.inMonth) return;
+      const x = c * (cell + gap);
+      const y = top + r * (cell + gap);
+      const step = heatStep(day.minutes);
+      svg += `<rect x="${x}" y="${y}" width="${cell}" height="${cell}" rx="6" fill="${step < 0 ? HEAT_EMPTY : HEAT[step]}"/>`;
+      if (day.key === todayKey) {
+        svg += `<rect x="${x + 0.75}" y="${y + 0.75}" width="${cell - 1.5}" height="${cell - 1.5}" rx="5.5" fill="none" stroke="${INK}" stroke-width="1.5"/>`;
+      }
+      svg += `<text x="${x + 6}" y="${y + 13}" font-size="10" fill="${step < 0 ? MUTED : HEAT_INK[step]}">${day.day}</text>`;
+      const tip = day.minutes ? `${fmtMinutes(day.minutes)} · ${day.sessions} ${day.sessions === 1 ? 'timelapse' : 'timelapses'}` : 'nothing recorded';
+      svg += `<rect x="${x}" y="${y}" width="${cell}" height="${cell}" fill="transparent" data-tip="${esc(month)} ${day.day} · ${tip}"/>`;
+    }),
+  );
+  const ly = H - 12;
+  svg += `<text x="${W - 5 * 16 - 34}" y="${ly + 8}" text-anchor="end" font-size="10" fill="${MUTED}">Less</text>`;
+  [HEAT_EMPTY, ...HEAT].forEach((color, i) => {
+    svg += `<rect x="${W - 5 * 16 - 28 + i * 16}" y="${ly}" width="12" height="12" rx="3" fill="${color}"/>`;
+  });
+  svg += `<text x="${W}" y="${ly + 8}" text-anchor="end" font-size="10" fill="${MUTED}">More</text>`;
+  const days = weeks.flat().filter((d) => d.inMonth && d.minutes);
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Recording each day, ${esc(monthLabel)}">${svg}</svg>${table(
+    `Recorded each day, ${monthLabel}`,
+    ['Day', 'Recorded'],
+    days.map((d) => [`${d.day}`, `${fmtMinutes(d.minutes)}, ${d.sessions} timelapses`]),
+  )}`;
+}
+
 // When you record across the day; the best hour is blue and the rest stay gray.
 export function hourChart(hours, bestHour) {
   const H = 96;

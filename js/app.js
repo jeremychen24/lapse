@@ -7,7 +7,8 @@ import { openCamera, closeCamera, cameraCount } from './camera.js';
 import { keepAwake, wakeSupported } from './wake.js';
 import { buildVideo, saveVideo } from './export.js';
 import * as T from './timelog.js';
-import { weekChart, hourChart } from './charts.js';
+import * as D from './dash.js';
+import { weekChart, hourChart, monthHeatmap } from './charts.js';
 
 const $ = (id) => document.getElementById(id);
 const cam = $('cam');
@@ -51,6 +52,7 @@ const current = () => document.body.dataset.screen;
 function show(name) {
   if (name !== 'live') setDark(false);
   document.body.dataset.screen = name;
+  document.querySelectorAll('#tabs [data-tab]').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
 }
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const uid = () => globalThis.crypto?.randomUUID?.() ?? Date.now().toString(36) + Math.random().toString(36).slice(2);
@@ -462,20 +464,89 @@ async function logSession(keys) {
     entry.thumb = await makeThumb(await store.getFrame(keys[Math.floor(keys.length / 2)]));
   } catch { /* stats still work without a picture */ }
   await store.putLog(entry).catch(() => {});
+  await loadLog();
+  awardBadges();
 }
 
-async function openStats() {
-  dropStream();
+async function loadLog() {
   try {
     logCache = await store.getLog();
   } catch {
     logCache = [];
   }
   logCache.sort((a, b) => T.entryStart(b) - T.entryStart(a));
+}
+
+// Badges are kept once earned, in localStorage as { id: when }.
+function earnedBadges() {
+  return readJSON('lapse.badges');
+}
+function awardBadges() {
+  const { earned, fresh } = D.checkBadges(logCache, earnedBadges());
+  if (!fresh.length) return;
+  try { localStorage.setItem('lapse.badges', JSON.stringify(earned)); } catch { /* private mode */ }
+  toast(fresh.length === 1 ? `${fresh[0].icon} New badge: ${fresh[0].name}` : `${fresh.map((b) => b.icon).join(' ')} ${fresh.length} new badges`);
+}
+
+let toastTimer = 0;
+function toast(msg) {
+  const el = $('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 3200);
+}
+
+async function openStats() {
+  dropStream();
+  await loadLog();
+  awardBadges();
   renderStatsScreen();
   show('stats');
   $('statsBody').scrollTop = 0;
+  // The first visit in a new week opens a look back at last week (like Nook).
+  const thisWeek = D.weekStart(Date.now());
+  if (hasLastWeek() && Number(readJSON('lapse.review').at || 0) < thisWeek) openReview();
 }
+
+// ---------- weekly review ----------
+
+const hasLastWeek = () => D.weekReview(logCache).sessions > 0;
+const fmtDay = (ms) => new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+
+function openReview() {
+  const r = D.weekReview(logCache);
+  const diff = r.minutes - r.before;
+  $('reviewDates').textContent = `${fmtDay(r.start)} – ${fmtDay(r.end)}`;
+  $('reviewTotal').textContent = T.fmtMinutes(r.minutes);
+  $('reviewDelta').textContent = !r.before
+    ? 'recorded'
+    : diff === 0 ? 'the same as the week before' : `${diff > 0 ? '+' : '−'}${T.fmtMinutes(Math.abs(diff))} on the week before`;
+  const earned = earnedBadges();
+  const badges = D.BADGES.filter((b) => earned[b.id] >= r.start && earned[b.id] <= r.end);
+  const rows = [
+    ['Timelapses', `${r.sessions}`],
+    r.bestDay && ['Best day', `${r.bestDay.label} · ${T.fmtMinutes(r.bestDay.minutes)}`],
+    r.longest && ['Longest', T.fmtMinutes(r.longest)],
+    badges.length && ['Badges', badges.map((b) => b.icon).join(' ')],
+  ].filter(Boolean);
+  $('reviewList').innerHTML = rows.map(([k, v]) => `<li><span>${k}</span><span>${v}</span></li>`).join('');
+  $('reviewLine').textContent = !r.before
+    ? 'A good start. Let’s build on it this week.'
+    : diff >= 0 ? 'More than the week before. Keep it rolling.' : 'A slower week happens. Every session still counts.';
+  $('review').hidden = false;
+}
+
+function closeReview() {
+  $('review').hidden = true;
+  try { localStorage.setItem('lapse.review', JSON.stringify({ at: Date.now() })); } catch { /* private mode */ }
+}
+
+$('reviewDone').onclick = closeReview;
+$('review').onclick = (e) => {
+  if (e.target === $('review')) closeReview();
+};
+$('reviewBtn').onclick = openReview;
 
 function historyRow(e) {
   const start = new Date(T.entryStart(e));
@@ -485,33 +556,55 @@ function historyRow(e) {
   return `<li>${thumb}<div><b>${day} · ${time}</b><small>${L.formatSpan(T.entryMs(e) / 1000)} · ${L.formatSpan(L.videoSeconds(e.frames))} video</small></div></li>`;
 }
 
+let monthOffset = 0; // the heatmap's month: 0 is this month, -1 last month, …
+const CHEVRON = (d) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg>`;
+
+// Same order as Nook's Stats: tiles, month, last 7 days, time of day, badges, then history.
 function renderStatsScreen() {
-  const body = $('statsBody');
-  if (!logCache.length) {
-    body.innerHTML = '<p class="empty">Finish a timelapse of a minute or more and your stats show up here.</p>';
-    return;
-  }
   const s = T.computeStats(logCache);
+  const now = new Date();
+  const month = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1);
+  const monthLabel = month.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
   const chart = (svg) => `<div class="chart">${svg}<div class="chart-tip" hidden></div></div>`;
   const tile = (label, value) => `<div class="tile"><span>${label}</span><b>${value}</b></div>`;
-  body.innerHTML = `
+  const earned = earnedBadges();
+  const empty = !logCache.length;
+  $('reviewBtn').hidden = !hasLastWeek();
+  $('statsBody').innerHTML = `
     <div class="tiles">
       ${tile('Today', T.fmtMinutes(s.todayMin))}
       ${tile('This week', T.fmtMinutes(s.weekMin))}
       ${tile('Streak', plural(s.streak, 'day'))}
       ${tile('Total', T.fmtMinutes(s.totalMin))}
     </div>
-    <h2 class="sec">Last 7 days</h2>
-    ${chart(weekChart(s.days))}
-    <h2 class="sec">Time of day</h2>
-    ${chart(hourChart(s.hours, s.bestHour))}
-    ${s.bestHour === null ? '' : `<p class="caption">You record the most around ${T.fmtHour(s.bestHour)}</p>`}
-    <h2 class="sec">History</h2>
-    <ul class="history">${logCache.slice(0, 50).map(historyRow).join('')}</ul>
-    <div class="send">
-      <button id="sendNook" class="pill">Send to Nook</button>
-      <p class="hint">Copies your stats (no photos or video). Then in Nook, open Stats and tap Paste from Lapse.</p>
-    </div>`;
+    <div class="row-head"><h2 class="sec">${monthLabel}</h2>
+      <div class="chevs">
+        <button class="icon-btn" data-month="-1" aria-label="Previous month">${CHEVRON('M15 6l-6 6 6 6')}</button>
+        <button class="icon-btn" data-month="1" aria-label="Next month" ${monthOffset === 0 ? 'disabled' : ''}>${CHEVRON('M9 6l6 6-6 6')}</button>
+      </div>
+    </div>
+    ${chart(monthHeatmap(D.monthGrid(logCache, month.getFullYear(), month.getMonth()), T.dayKey(Date.now()), monthLabel))}
+    ${empty ? '<p class="empty">Finish a timelapse of a minute or more to see your stats.</p>' : `
+      <h2 class="sec">Last 7 days</h2>
+      ${chart(weekChart(s.days))}
+      <h2 class="sec">Time of day</h2>
+      ${chart(hourChart(s.hours, s.bestHour))}
+      ${s.bestHour === null ? '' : `<p class="caption">You record the most around ${T.fmtHour(s.bestHour)}</p>`}`}
+    <div class="row-head"><h2 class="sec">Badges</h2><span class="hint">${D.BADGES.filter((b) => earned[b.id]).length} of ${D.BADGES.length}</span></div>
+    <div class="badges">${D.BADGES.map((b) => `
+      <div class="badge${earned[b.id] ? ' on' : ''}">
+        <span class="badge-icon" aria-hidden="true">${b.icon}</span>
+        <b>${b.name}</b>
+        <small>${b.hint}</small>
+      </div>`).join('')}
+    </div>
+    ${empty ? '' : `
+      <h2 class="sec">History</h2>
+      <ul class="history">${logCache.slice(0, 50).map(historyRow).join('')}</ul>
+      <div class="send">
+        <button id="sendNook" class="pill">Send to Nook</button>
+        <p class="hint">Copies your stats (no photos or video). Then in Nook, open Stats and tap Paste from Lapse.</p>
+      </div>`}`;
 }
 
 async function copyText(text) {
@@ -551,14 +644,25 @@ function showTip(e) {
 $('statsBody').addEventListener('pointerover', showTip);
 $('statsBody').addEventListener('pointerdown', showTip);
 $('statsBody').addEventListener('click', async (e) => {
+  const step = e.target.closest('[data-month]');
+  if (step && !step.disabled) {
+    monthOffset = Math.min(0, monthOffset + Number(step.dataset.month));
+    renderStatsScreen();
+    return;
+  }
   const btn = e.target.closest('#sendNook');
   if (!btn) return;
   const ok = await copyText(T.encodeSync(logCache)); // built before any await: iOS needs the tap
   btn.textContent = ok ? 'Copied · now paste in Nook' : 'Couldn’t copy';
   setTimeout(() => (btn.textContent = 'Send to Nook'), 3000);
 });
-$('statsBtn').onclick = openStats;
-$('statsClose').onclick = showReady;
+// Tabs: Record (camera) and Stats. Leaving Record turns the camera off to save battery.
+$('tabs').addEventListener('click', (e) => {
+  const tab = e.target.closest('[data-tab]')?.dataset.tab;
+  if (!tab || tab === current()) return;
+  if (tab === 'stats') openStats();
+  else showReady();
+});
 
 $('more').onclick = () => {
   clearResult();
@@ -581,7 +685,15 @@ armed($('recoverDiscard'), 'Discard', 'Tap again to discard', discard);
 
 async function boot() {
   const local = ['localhost', '127.0.0.1'].includes(location.hostname);
-  if ('serviceWorker' in navigator && !local) navigator.serviceWorker.register('./sw.js').catch(() => {});
+  if ('serviceWorker' in navigator && !local) {
+    // When a new version takes over, reload once so it shows right away,
+    // but never in the middle of a recording or before a video is saved.
+    const hadOld = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (hadOld && ['boot', 'intro', 'ready', 'stats'].includes(current()) && $('review').hidden) location.reload();
+    });
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  }
   store.persist();
   try {
     const meta = await store.getMeta();

@@ -14,7 +14,7 @@ At "every 5s", one hour of work becomes a 24-second video.
 
 ## Stats, and Nook
 
-Tap the chart icon on the camera screen for your stats: today, this week, streak, total, the last 7 days, the time of day you record most, and a history of past timelapses. Sessions shorter than a minute don't count.
+Two tabs at the bottom, **Record** and **Stats**, like Nook. Stats is laid out like Nook's: today, this week, streak and total; a month heatmap; the last 7 days; the time of day you record most; 14 badges; and a history of past timelapses with thumbnails. The first time you open Stats in a new week, a "Your week" recap shows last week against the week before (it's also under **Last week**). Sessions shorter than a minute don't count.
 
 **Send to Nook** copies your stats (times only, no photos or video) as a short text code. In [Nook](https://github.com/jeremychen24/nook), open Stats and tap **Paste from Lapse**. Home Screen apps on iPhone can't read each other's data, so this copy-paste is the bridge. Sending again is safe: sessions are matched by ID and never counted twice. The format lives in `js/timelog.js`, a file shared word-for-word with Nook.
 

@@ -1,5 +1,7 @@
 // Network first (always fresh when online), cache as the offline fallback.
-const CACHE = 'lapse-v2';
+// Requests skip the browser's HTTP cache (GitHub Pages allows 10 minutes),
+// so a new version shows up on the very next open.
+const CACHE = 'lapse-v3';
 const SHELL = [
   './',
   'index.html',
@@ -12,6 +14,7 @@ const SHELL = [
   'js/export.js',
   'js/timelog.js',
   'js/charts.js',
+  'js/dash.js',
   'vendor/mp4-muxer.mjs',
   'manifest.webmanifest',
   'icons/icon-192.png',
@@ -33,11 +36,18 @@ self.addEventListener('activate', (e) => {
   );
 });
 
+// Same approach as Nook's (works on iPhone): page loads can't take extra fetch options,
+// so those are fetched by URL.
+const fresh = (req) =>
+  req.mode === 'navigate'
+    ? fetch(req.url, { cache: 'no-cache', credentials: 'same-origin' })
+    : fetch(req, { cache: 'no-cache' });
+
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== location.origin) return;
   e.respondWith(
-    fetch(req)
+    fresh(req)
       .then((res) => {
         if (res.ok) {
           const copy = res.clone();

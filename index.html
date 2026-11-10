@@ -34,9 +34,6 @@
 
 <section id="ready" class="screen">
   <div class="top">
-    <button id="statsBtn" class="round" aria-label="Stats">
-      <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 20v-7M12 20V5M18 20v-10"/></svg>
-    </button>
     <button id="flip" class="round" aria-label="Switch camera">
       <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16"/><path d="M20 20v-4h-4"/></svg>
     </button>
@@ -96,12 +93,34 @@
 <section id="stats" class="screen">
   <div class="stats-head">
     <h1>Stats</h1>
-    <button id="statsClose" class="round" aria-label="Close stats">
-      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
-    </button>
+    <button id="reviewBtn" class="ghost" hidden>Last week</button>
   </div>
   <div id="statsBody" class="stats-body"></div>
 </section>
+
+<nav id="tabs" class="tabs">
+  <button data-tab="ready" class="active">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none"/></svg>
+    Record
+  </button>
+  <button data-tab="stats">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 20h16"/><path d="M7 16v-5M12 16V6M17 16v-8"/></svg>
+    Stats
+  </button>
+</nav>
+
+<div class="sheet" id="review" hidden>
+  <div class="sheet-card" role="dialog" aria-labelledby="reviewTitle">
+    <p class="hint" id="reviewDates"></p>
+    <h2 id="reviewTitle">Your week</h2>
+    <div class="review-hero"><b id="reviewTotal"></b><span id="reviewDelta"></span></div>
+    <ul class="review-list" id="reviewList"></ul>
+    <p class="review-line" id="reviewLine"></p>
+    <button class="pill" id="reviewDone">On to this week</button>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
 
 <section id="result" class="screen center">
   <video id="out" playsinline muted loop autoplay></video>
